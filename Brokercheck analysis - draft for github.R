@@ -2,6 +2,8 @@ library(tidyverse)
 library(rvest)
 library(lubridate)
 library(jsonlite)
+library(stringi)
+library(skimr)
 
 
 # ---- original analysis and replication on nov 13 from below
@@ -356,7 +358,7 @@ fraud_search_string <- "10b-5|10(b)|fals|fictitious|forg|fake|misrepr|fraud|anti
 
 expedited_9552_search_string <- "9552"
 
-expedited_9553_search_string <- "9553"
+expedited_9553_search_string <- "fail to pay|fails to pay|failed to pay"
 
 expedited_9554_search_string <- "9554"
 
@@ -378,8 +380,6 @@ resolution_factors <- total_count_for_scraping %>%
   select(-index)
 
 View(resolution_factors)
-
-library(stringi)
 
 total_count_for_scraping <- total_count_for_scraping %>% 
   mutate(text_findings = stringr::str_conv(text_findings, "UTF-8"),
@@ -638,6 +638,10 @@ total_count_summary <- ft_summarize_count %>%
   select(-c(`FALSE`, `TRUE`))  %>%
   left_join(expedited_9552_time_series) %>%
   select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(expedited_9553_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(expedited_9554_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
   left_join(outsidebusiness_alleged_time_series) %>%
   select(-c(`FALSE`, `TRUE`))  %>%
   left_join(outsidebusiness_found_time_series) %>%
@@ -670,11 +674,6 @@ total_count_summary <- ft_summarize_count %>%
   select(-c(`FALSE`, `TRUE`)) %>%
   left_join(just_and_equitable_found_time_series) %>%
   select(-c(`FALSE`, `TRUE`, `NA`))
-
-
-
-
-library(skimr)
 
 total_count_stats <- total_count_summary %>%
   skim() 
@@ -967,5 +966,3 @@ total_count_for_scraping %>%
 #    select(-c(links, has_crd, disclosureType, disclosureResolution, isIapdExcludedCCFlag, isBcExcludedCCFlag, bcCtgryType, DocketNumberFDA, DocketNumberAAO, `Firm Name`, `Initiated By`, `Termination Type`, Sanctions...20, `Damage Amount Requested`, `Damages Granted`, DisplayAAOLinkIfExists, arbitrationClaimFiledDetail, arbitrationDocketNumber, `Broker Comment`, `Settlement Amount`, criminalCharges, `Description of Investigation`, `Judgment/Lien Amount`, `Judgment/Lien Type`, Type, Disposition, iaCtgryType, Individual.Name, disclosure, categorical))
   
 saveRDS(total_count_for_scraping, "total_count_for_scraping_post_analysis_2024_02_20.RDS")
-
-
