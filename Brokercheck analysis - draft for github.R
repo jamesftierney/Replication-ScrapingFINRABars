@@ -13,26 +13,28 @@ list_of_bars <- readRDS("list_of_bars.RDS")
 
 # need to drop rows with duplicate entries
 # so create a vector of duped indexes to drop
-dropped_bars <- list_of_bars %>%
-  group_by(CRD) %>%
-  filter(n() > 1) %>%
-  ungroup() %>%
-  # each duplicate entry has only two, so we can select just the second entry
-  slice(which(row_number() %% 2 == 1)) %>%
-  .$index 
+#dropped_bars <- test_list_of_bars %>%
+#  group_by(CRD) %>%
+#  filter(n() > 1) %>%
+#  ungroup() %>%
+#  # each duplicate entry has only two, so we can select just the second entry
+#  slice(which(row_number() %% 2 == 1)) %>%
+#  .$index 
 
-list_of_bars <- list_of_bars %>%
-  filter(!(index %in% dropped_bars))
+test_list_of_bars_unnested 
+
+#test_list_of_bars <- test_list_of_bars_unnested %>%
+#  filter(!(index %in% dropped_bars))
 
 # stuff i scraped from brokercheck -- will upload that and this script, when cleaned, to github
-scraped_from_brokercheck <- readRDS("scraped_from_brokercheck_2023_11_13.RDS")
+#scraped_from_brokercheck <- readRDS("scraped_from_brokercheck_2023_11_13.RDS")
 
 # stuff my RAs and I hand-coded
-list_of_bars_manual <- read.csv("list_of_bars_manual (1).csv", encoding="UTF-8")
+list_of_bars_manual <- read_csv("list_of_bars_manual (1).csv")
 
-initiated_by_unclean <- list_of_bars %>%
-  left_join(scraped_from_brokercheck) %>%
-  left_join(list_of_bars_manual) %>%
+initiated_by_unclean <-  
+  test_list_of_bars_unnested %>%
+  full_join(list_of_bars_manual) %>%
   rename(has_crd = crd) %>%
   mutate(off_jurisdiction = case_when(has_crd == TRUE & is.na(bcCtgryType) ~ TRUE,
                                       TRUE ~ FALSE)) %>%
@@ -188,64 +190,34 @@ initiated_by_unclean <- list_of_bars %>%
 # there are a lot of other folks who have imposed sanctions in the brokercheck data
 # but we are mainly interested in finra here, so let's subset it to the bars where we do and don't have data
 
+# there is a many to many relationship [7516,] of x and [7404,] of y
+
 initiated_by_unclean_backup <- initiated_by_unclean
+
+# this got messed up in the last analysis
 
 finra_hand_coded_disclosures <- initiated_by_unclean %>%
   filter(barring_agency == "finra",
-         is.na(Sanctions...14)) %>%
-  mutate(types = "Hand coded")
+         is.na(Sanctions...32)) %>%
+  mutate(category = "Textual or categorical (BrokerCheck record unavailable)")
 
 finra_just_bars <- initiated_by_unclean %>%
   filter(barring_agency == "finra",
-         str_detect(Sanctions...14, "Bar"))  %>%
-  mutate(types = "FINRA BrokerCheck record available")
-
+         str_detect(Sanctions...32, "Bar"))  %>%
+  mutate(category = "FINRA BrokerCheck record available")
 
 finra_other_sanctions <- initiated_by_unclean %>%
   filter(barring_agency == "finra",
-         !str_detect(Sanctions...14, "Bar"))   %>%
-  mutate(types = "Other sanctions imposed by FINRA in BrokerCheck records")
+         !str_detect(Sanctions...32, "Bar"))   %>%
+  mutate(category = "Other sanctions imposed by FINRA in BrokerCheck records")
 
-finra_data_unavailable <- initiated_by_unclean %>%
-  filter(is.na(bcCtgryType) & 
-           has_crd == TRUE)   %>%
-  mutate(types = "Only name and CRD available")
-
+# HAVE TO FIX THIS WITH THE DUPES
 total_count <- rbind(
   finra_hand_coded_disclosures,
-  finra_just_bars,
-  finra_data_unavailable
+  finra_just_bars
 )
 
 
-
-
-#install.packages("flextable")
-library(flextable)
-
-summarize_count <- total_count %>%
-  select(index, types, `Sanctions...14`, bcCtgryType, off_jurisdiction, disclosure, categorical) %>%
-  mutate(type = case_when(!(disclosure == "") ~ "Textual disclosure available",
-                          !(categorical == "") ~ "Categorical disclosures (dates available)",
-                          !is.na(bcCtgryType) ~ "FINRA BrokerCheck record available",
-                          TRUE ~ "Only name and CRD available")) %>%
-  mutate(type = as_factor(type)) %>%
-  group_by(type) %>%
-  summarize(n()) 
-
-# produce table __
-
-summarize_count %>%
-  ungroup() %>%
-  mutate(type = as.character(type)) %>%
-  rbind(c(type = "Total", `n()` = 284 + 372 + 5277 + 2868)) %>%
-  rename(`Type of data` = type) %>%
-  rename(Count = `n()`) %>%
-  regulartable() %>%
-  autofit() %>% 
-#  width(j=~x,width=1) %>% width(j=~y,width=1) %>%
-  save_as_docx(path = "summary_categorical_table.docx")
-  
 
 # ------------
 # we're going to make a new list of all the categoricals
@@ -276,13 +248,11 @@ categoricals_custom <- categoricals_temp %>%
 # Assign missing four values
 
 categoricals_custom$extracted <- c(
-  # did not parse because of parentheses
-  ymd("2014-07-14"),
   # imputed from https://www.finra.org/sites/default/files/RCA/p002371.pdf
+  # did not parse because of parentheses
+  ymd("2014-07-14"), 
   ymd("2002-11-01"),
-  # did not parse because of parentheses
-  ymd("2015-09-04"),
-  # did not parse because of parentheses
+  ymd("2015-09-04"), 
   ymd("2002-12-02")
 )
 
@@ -290,27 +260,91 @@ categoricals_temp <- categoricals_temp %>%
   full_join(categoricals_custom) %>%
   filter(!is.na(extracted)) 
 
-total_count <- total_count %>%
-  left_join(categoricals_temp) %>%
+total_count_with_dates <- total_count %>%
+  full_join(categoricals_temp) %>%
   arrange(index) %>%
   mutate(eventDate = as.character(mdy(eventDate)), 
          eventDate = ifelse(is.na(eventDate), ifelse(is.na(extracted), NA, as.character(extracted)), as.character(eventDate)),
          eventDate = as.Date(eventDate)
   ) %>%
   select(-extracted)
-  
 
-ft_summarize_count <- total_count %>%
+# MUST DEAL WITH THESE BEFORE PRODUCTION
+
+dupes <- total_count_with_dates %>%
+  arrange(index) %>%
+  group_by(CRD) %>%
+  filter(n() > 1) %>%
+  #  select(index, , CRD, `Initiated By`, Allegations, Resolution, Sanctions...32, Sanctions...38, disclosure, categorical) %>%
+  select(index, CRD) %>%
+  unique() %>%
+  ungroup() #%>%
+#write_csv("dupes.csv")
+
+finra_dupes <- total_count_with_dates %>%
+  filter(CRD %in% dupes$CRD)
+
+first_finra_dupes <- finra_dupes %>%
+  select(index, CRD, eventDate, Allegations, `Regulator Statement`) %>%
+  group_by(index) %>%
+  arrange(eventDate, .by_group = TRUE) %>%
+  slice(1L) %>%
+  mutate(sequence = fct("First Bar"))
+
+second_finra_dupes <- finra_dupes %>%
+  select(index, CRD, eventDate, Allegations, `Regulator Statement`) %>%
+  group_by(index) %>%
+  arrange(eventDate, .by_group = TRUE) %>%
+  mutate(new_row = row_number(),
+         max_row = max(new_row)) %>%
+  slice(2:n()) %>%
+  mutate(sequence = fct("Subsequent Bar"))
+
+middle_drops <- second_finra_dupes %>%
+  ungroup() %>%
+  group_by(CRD) %>%
+  filter(!new_row == max_row) %>%
+  rename(`Number of Bars` = max_row) %>%
+  ungroup() 
+
+first_bars <- first_finra_dupes %>%
+  ungroup() %>%
+  select(-sequence)
+
+last_bars <- second_finra_dupes %>%
+  ungroup() %>%
+  group_by(CRD) %>%
+  filter(new_row == max_row) %>%
+  rename(`Number of Bars` = max_row,
+         `Second Bar` = eventDate) %>%
+  ungroup() 
+  
+finra_dupe_drops <- last_bars %>%
+  rename(eventDate = `Second Bar`) %>%
+  full_join(middle_drops) %>%
+  select(-c(sequence, `Number of Bars`))
+
+multiple_bars <- first_bars %>%
+  rename(`First Bar` = eventDate) %>%
+  full_join(last_bars, by = c("index", "CRD")) %>%
+  mutate(`Days between Bars` = `Second Bar` - `First Bar`) %>%
+  select(-c(sequence, Allegations.x, Allegations.y, `Regulator Statement.x`, `Regulator Statement.y`, `Number of Bars`))
+
+ft_summarize_count <- total_count_with_dates %>%
+  group_by(index) %>%
+  arrange(eventDate, .by_group = TRUE) %>%
+  mutate(new_row = row_number(),
+         max_row = max(new_row)) %>%
+  anti_join(second_finra_dupes, by = join_by(index, CRD, eventDate, new_row)) %>%
   mutate(year = case_when(!is.na(eventDate) ~ year(eventDate),
                           TRUE ~ NA)) %>%
   filter(!is.na(year)) %>%
   group_by(year) %>%
   summarize(count = n()) %>%
-  filter(year > 2000) %>%
-  mutate(imputed_count = round(count + (372+2869)/23)) %>%
+  filter(year > 1998) %>%
+  #mutate(`Imputed count` = round(count + (372)/23)) %>%
   rename(Year = year,
-         Count = count,
-         `Imputed count` = imputed_count) 
+         Count = count) 
 
 ft_summarize_flextable <- ft_summarize_count %>%
   flextable() 
@@ -323,10 +357,10 @@ ft_summarize_flextable <- colformat_double(
 ft_summarize_flextable %>%
   autofit() %>% 
   #  width(j=~x,width=1) %>% width(j=~y,width=1) %>%
-  save_as_docx(path = "annual_counts.docx")
+  save_as_docx(path = "Table 3 --- annual_counts.docx")
 
 ft_summarize_count %>%
-  rename(`Naively imputed count` = `Imputed count`) %>%
+  #rename(`Naively imputed count` = `Imputed count`) %>%
   pivot_longer(!Year, names_to = "Type", values_to = "Count") %>%
   mutate(Type = as.factor(Type)) %>%
   ggplot(mapping = aes(x = Year,
@@ -339,12 +373,43 @@ ft_summarize_count %>%
   ylab("Number of bars in category") +
   theme_minimal() 
 
-ggsave("FINRA_annual_counts.png",
+ggsave("Figure 1 --- FINRA_annual_counts.png",
        dpi = 300,
        scale = 0.5)
 
 
 
+#install.packages("flextable")
+library(flextable)
+
+summarize_count <- total_count_with_dates %>%
+  group_by(index) %>%
+  arrange(eventDate, .by_group = TRUE) %>%
+  mutate(new_row = row_number(),
+         max_row = max(new_row)) %>%
+  anti_join(second_finra_dupes, by = join_by(index, CRD, eventDate, new_row)) %>%
+  select(index, CRD, `Sanctions...32`, bcCtgryType, off_jurisdiction, disclosure, categorical, eventDate, Resolution, `Sanction Details`, `Regulator Statement`, Allegations, category, new_row, max_row) %>%
+  mutate(type = case_when(!(disclosure == "") ~ "Textual disclosure available",
+                          !(categorical == "") ~ "Categorical disclosures (dates available)",
+                          !is.na(eventDate) ~ "FINRA BrokerCheck record available --- first bars",
+                          TRUE ~ "Not scrapable (only name and CRD available)"),
+         type = as_factor(type),
+         year = case_when(!is.na(eventDate) ~ year(eventDate),
+                          TRUE ~ NA))
+
+summarize_count %>%
+  group_by(type) %>%
+  summarize(n()) %>%
+  ungroup() %>%
+  mutate(type = as.character(type)) %>%
+  rbind(c(type = "FINRA BrokerCheck record available --- subsequent bars", `n()` = 76),
+    c(type = "Total", `n()` = 284 + 372 + 8176 + 76)) %>%
+  rename(`Type of data` = type) %>%
+  rename(Count = `n()`) %>%
+  regulartable() %>%
+  autofit() %>% 
+  #  width(j=~x,width=1) %>% width(j=~y,width=1) %>%
+  save_as_docx(path = "Table 1.docx")
 
 
 #####################################################
@@ -352,9 +417,12 @@ ggsave("FINRA_annual_counts.png",
 
 # begin by defining some search terms
 
-rule8210_search_string <- "8210|to respond|provide|testimony|requests for|request for|failed to produce|failure to produce|refused to produce|refused to appear|on-the-record|interview|to update"
+rule8210_search_string <- "8210|to respond|provide|testimony|requests for|request for|failed to produce|failure to produce|refused to produce|refused to appear|failed to produce|failed to appear|on\\-the\\-record|interview|to update"
 
-fraud_search_string <- "10b-5|10(b)|fals|fictitious|forg|fake|misrepr|fraud|antifraud|deceiv|decept"
+fraud_search_string <- "10b\\-5|10\\(b\\)|fals|fictitious|forg|fake|misrepr|fraud|antifraud|deceiv|decept"
+
+
+string_for_2010 <- "2110|just and equit|rule 2010|rules 2010|finra 2010|rules 2110\\, 2010|rule 2010|rules 2010|finra 2010|rules 2110\\, 2010|rules 1122\\, 2010|2020 and 2010|2020\\, 2111 and 2010|8210\\, 2010|1122 and 2010|2010\\, 8210|1250\\, 2010|2020\\, and 2010|8210 \\& 2010|2150\\(a\\)\\, 2010"
 
 expedited_9552_search_string <- "9552"
 
@@ -362,24 +430,43 @@ expedited_9553_search_string <- "fail to pay|fails to pay|failed to pay"
 
 expedited_9554_search_string <- "9554"
 
-total_count_for_scraping <- total_count %>%
+total_count_for_scraping <- summarize_count %>%
+  group_by(index) %>%
+  arrange(eventDate, .by_group = TRUE) %>%
+  mutate(new_row = row_number(),
+         max_row = max(new_row)) %>%
+  ungroup() %>%
+  anti_join(second_finra_dupes, by = join_by(index, CRD, eventDate, new_row)) %>%
   mutate(Resolution = as.factor(Resolution)) %>%
   mutate(disclosure = tolower(stri_trans_general(disclosure, "Publishing-Any; Any-ASCII")),
          `Sanction Details` = tolower(stri_trans_general(`Sanction Details`, "Publishing-Any; Any-ASCII")),
          `Regulator Statement` = tolower(stri_trans_general(`Regulator Statement`, "Publishing-Any; Any-ASCII")),
          categorical = tolower(stri_trans_general(categorical, "Publishing-Any; Any-ASCII"))) %>%
-  unite("text_findings", c(`Sanction Details`, `Regulator Statement`, disclosure, categorical), sep = "", na.rm = TRUE, remove = FALSE) %>%
-  mutate(year = year(eventDate))
+  unite("text_findings", c(`Sanction Details`, `Regulator Statement`, disclosure, categorical), sep = "", na.rm = TRUE, remove = FALSE) #%>%
+  #mutate(year = year(eventDate))
 
-resolution_factors <- total_count_for_scraping %>%
-  select(Resolution) %>%
-  unique() %>%
-  mutate(index = row_number()) %>%
-  # define three kinds of factor levels to hand-code for whether a bar is resolved by consent
-  filter(index %in% c(1, 4, 17)) %>%
-  select(-index)
+total_count_for_scraping <- total_count_for_scraping %>%
+  mutate(Resolution = fct_na_value_to_level(Resolution, "Missing Data"),
+         Resolution = fct_collapse(Resolution,
+               Settlement = c("Acceptance, Waiver & Consent(AWC)", 
+                              "Consent",
+                              "Decision & Order of Offer of Settlement"),
+               Letter = c("Letter",
+                          "LETTER",
+                          "letter",
+                          "LETTTER",
+                          "BARRED LETTER"),
+               Adjudication = c("Decision",
+                                "Order",
+                                "Judgment"),
+               `Affirmed on Appeal` = c("U.S. COURT OF APPEALS DECISION",
+                                        "Opinion of the Commission",
+                                        "Order dismissing application for review"),
+               Pending = c("Pending appeal",
+                         "Pending Appeal"))) 
 
-View(resolution_factors)
+total_count_for_scraping$Resolution %>%
+  fct_count()
 
 total_count_for_scraping <- total_count_for_scraping %>% 
   mutate(text_findings = stringr::str_conv(text_findings, "UTF-8"),
@@ -390,7 +477,7 @@ total_count_for_scraping <- total_count_for_scraping %>%
          fraud_alleged = str_detect(Allegations, fraud_search_string),
          fraud_found = str_detect(text_findings, fraud_search_string),
          expedited_9552 = case_when(str_detect(text_findings, expedited_9552_search_string) ~ TRUE,
-                                    str_detect(Allegations, expedited_9552_search_string) ~ TRUE,
+                                    #str_detect(Allegations, expedited_9552_search_string) ~ TRUE,
                                     TRUE ~ FALSE),
          expedited_9553 = case_when(str_detect(text_findings, expedited_9553_search_string) ~ TRUE,
                                     str_detect(Allegations, expedited_9553_search_string) ~ TRUE,
@@ -399,12 +486,12 @@ total_count_for_scraping <- total_count_for_scraping %>%
                                     str_detect(Allegations, expedited_9554_search_string) ~ TRUE,
                                     TRUE ~ FALSE),
          failtopay = expedited_9553,
-         conversion_alleged = str_detect(Allegations, "convers|misapprop|commingl"),
-         conversion_found = str_detect(text_findings, "convers|misapprop|commingl"),
+         conversion_alleged = str_detect(Allegations, "convert|convers|misapprop|commingl"),
+         conversion_found = str_detect(text_findings, "convert|convers|misapprop|commingl"),
          pst_alleged = str_detect(Allegations, "private securities|unregistered securities"),
          pst_found = str_detect(text_findings, "private securities|unregistered securities"),
-         just_and_equitable_alleged = str_detect(Allegations, "2110|just and equit"),
-         just_and_equitable_found = str_detect(text_findings, "2110|just and equit"),
+         just_and_equitable_alleged = str_detect(Allegations, string_for_2010),
+         just_and_equitable_found = str_detect(text_findings, string_for_2010),
          exam_alleged = str_detect(Allegations, "exam"),
          exam_found = str_detect(text_findings, "exam"),
          suitability_alleged = str_detect(Allegations, "suitab"),
@@ -417,12 +504,15 @@ total_count_for_scraping <- total_count_for_scraping %>%
          outsidebusiness_found = str_detect(text_findings, "outside business|transacted away"),         
          withoutadmitting = case_when(str_detect(Allegations, "without admitting") ~ TRUE,
                                       str_detect(text_findings, "without admitting") ~ TRUE,
+                                      str_detect(`Regulator Statement`, "without admitting") ~ TRUE,
                                       TRUE ~ FALSE),
          expedited = case_when(str_detect(Allegations, "expedit") ~ TRUE,
                                       str_detect(text_findings, "expedit") ~ TRUE,
+                                      Resolution == "Letter" ~ TRUE,
                                       TRUE ~ FALSE),
          by_consent_detected = case_when(str_detect(Allegations, "consent") ~ TRUE,
-                                         Resolution %in% resolution_factors$Resolution ~ TRUE,
+                                         Resolution == "Settlement" ~ TRUE,
+                                         str_detect(`Regulator Statement`, "consent") ~ TRUE,
                                          TRUE ~ FALSE)) 
 
 
@@ -493,7 +583,10 @@ expedited_9552_time_series <- total_count_for_scraping %>%
   count() %>%
   pivot_wider(names_from = expedited_9552, values_from = n) %>%
   ungroup() %>%
-  mutate(proportion_expedited_9552 = `TRUE` / (`FALSE` + `TRUE`))
+  mutate(proportion_expedited_9552 = `TRUE` / (`FALSE` + `TRUE`),
+         expedited_9552 = `TRUE`)
+
+
 
 expedited_9553_time_series <- total_count_for_scraping %>%
   group_by(expedited_9553, year) %>%
@@ -593,6 +686,13 @@ outsidebusiness_found_time_series <- total_count_for_scraping %>%
   ungroup() %>%
   mutate(proportion_outsidebusiness_found = `TRUE` / (`FALSE` + `TRUE`))
 
+expedited_time_series <- total_count_for_scraping %>%
+  group_by(expedited, year) %>%
+  count() %>%
+  pivot_wider(names_from = expedited, values_from = n) %>%
+  ungroup() %>%
+  mutate(expedited = `TRUE` / (`FALSE` + `TRUE`))
+
 not_accounted_for_time_series <- total_count_for_scraping %>%
   filter(rule8210_found == "FALSE",
          rule8210_alleged == "FALSE",
@@ -615,12 +715,18 @@ not_accounted_for_time_series <- total_count_for_scraping %>%
          u4_alleged == "FALSE",
          u4_found == "FALSE",
          outsidebusiness_alleged == "FALSE",
-         outsidebusiness_found == "FALSE") %>%
+         outsidebusiness_found == "FALSE",
+         expedited == "FALSE") %>%
+  select(index, eventDate, Resolution, `Sanction Details`, `Regulator Statement`, Allegations, year)
+
+write_csv(not_accounted_for_time_series, "not_accounted_for_time_series.csv")
+
+not_accounted_for_time_series %>%
   group_by(year) %>%
   count() %>%
   rename(`not accounted for` = n)
 
-write_csv(not_accounted_for_time_series, "not_accounted_for_time_series.csv")
+
 
 total_count_summary <- ft_summarize_count %>%
   rename(year = Year) %>%
@@ -673,6 +779,8 @@ total_count_summary <- ft_summarize_count %>%
   left_join(just_and_equitable_alleged_time_series) %>%
   select(-c(`FALSE`, `TRUE`)) %>%
   left_join(just_and_equitable_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`)) %>%
+  left_join(expedited_time_series) %>%
   select(-c(`FALSE`, `TRUE`, `NA`))
 
 total_count_stats <- total_count_summary %>%
@@ -680,19 +788,21 @@ total_count_stats <- total_count_summary %>%
 
 total_count_stats %>%
   filter(skim_type == "numeric") %>%
-  slice(2:24) %>%
+  slice(2:26) %>%
   as_tibble() %>%
-  mutate(complete_rate = round(complete_rate, digits = 2),
-         numeric.mean = round(numeric.mean, digits = 3),
-         numeric.sd = round(numeric.sd, digits = 3),
-         numeric.p0 = round(numeric.p0, digits = 3),
-         numeric.p25 = round(numeric.p25, digits = 3),
-         numeric.p50 = round(numeric.p50, digits = 3),
-         numeric.p75 = round(numeric.p75, digits = 3),
-         numeric.p100 = round(numeric.p100, digits = 3)) %>%
-  select(-c(skim_type, n_missing)) %>%
+  mutate(`% complete` = round(complete_rate, digits = 2),
+         Mean = round(numeric.mean, digits = 2),
+         SD = round(numeric.sd, digits = 2),
+         Minimum = round(numeric.p0, digits = 2),
+         `25th %ile` = round(numeric.p25, digits = 2),
+         `50th %ile` = round(numeric.p50, digits = 2),
+         `75th %ile` = round(numeric.p75, digits = 2),
+         Maximum = round(numeric.p100, digits = 2)) %>%
+  select(skim_variable, `% complete`, Mean, SD, Minimum, `25th %ile`, `50th %ile`, `75th %ile`, Maximum, numeric.hist) %>%
+  rename(Histogram = numeric.hist) %>%
+  filter(!skim_variable %in% c("expedited_9552", "proportion_expedited_9554")) %>%
   regulartable() %>%
-  save_as_docx(path = "table.docx")
+  save_as_docx(path = "Table 2.docx")
 
 ggplot(data = total_count_summary, aes(x = year)) +
   #  geom_line() +
@@ -714,42 +824,119 @@ ggplot(data = total_count_summary, aes(x = year)) +
   scale_y_continuous(name = "Annual percentage of bars in category",
                      labels = scales::label_percent())
 
-ggsave("FINRA_8210_bars.png",
+ggsave("Figure 2 -- FINRA_8210_bars.png",
        dpi = 300,
-       scale = 0.5)
+       scale = 1)
 
-
+library(forcats)
 
 remedy_count_join <- total_count_for_scraping %>%
-  filter(!is.na(Resolution)) %>%
+#  filter(!is.na(Resolution)) %>%
   mutate(year = year(eventDate)) %>%
   group_by(year) %>% 
   summarize(total = n())
 
+unknowns <- total_count_for_scraping %>%
+  filter(Resolution %in% c("Other", "Letter", "Missing Data"),
+         is.na(eventDate)) %>%
+  mutate(Resolution = fct("Unknown"),
+         year = year(eventDate)) %>%
+  group_by(year, Resolution) %>% 
+  summarize(count = n())
+
+expediteds <- total_count_for_scraping %>%
+  filter(Resolution %in% c("Other", "Letter", "Missing Data"),
+         !is.na(eventDate)) %>%
+  mutate(Resolution = fct("Expedited Proceeding"),
+         year = year(eventDate)) %>%
+  group_by(year, Resolution) %>% 
+  summarize(count = n())
+
+unknowns <- unknowns %>%
+  full_join(expediteds) %>%
+  full_join(remedy_count_join) %>%
+  mutate(proportion = count / total) %>%
+  filter(!is.na(count),
+         !is.na(year)) %>%
+  print(n=Inf)
+
 remedy_count <- total_count_for_scraping %>%
-  filter(!is.na(Resolution)) %>%
   mutate(year = year(eventDate)) %>%
   group_by(year, Resolution) %>% 
   summarize(count = n()) %>%
   full_join(remedy_count_join) %>%
+  ungroup() %>%
   mutate(proportion = count / total) %>%
+  full_join(unknowns) %>%
   filter(year>1998) 
 
 remedy_count %>%
+  filter(Resolution %in% c("Settlement", "Adjudication", "Expedited Proceeding")) %>%
+  ggplot(aes(x = year, y = proportion, linetype = Resolution)) +
+  geom_line() +
+  labs(title = "Dispositions of FINRA bars (by proportion)") +
+  xlab("Year") +
+  theme_classic() +
+  scale_y_continuous(name = "Percentage of that year's bars resolved by this category of disposition",
+                     labels = scales::label_percent())
+
+ggsave("Figure 7 --- FINRA_bars_dispositions_proportional.png",
+       dpi = 300,
+       scale = 1)
+
+remedy_count %>%
+  filter(Resolution %in% c("Settlement", "Adjudication", "Expedited Proceeding")) %>%
+  ggplot(aes(x = year, y = count, linetype = Resolution)) +
+  geom_line() +
+  labs(title = "Dispositions of FINRA bars (count)") +
+  xlab("Year") +
+  theme_classic() +
+  scale_y_continuous(name = "Annual count of bars resolved by this category of disposition")
+
+ggsave("Figure 8 --- FINRA_bars_dispositions_count.png",
+       dpi = 300,
+       scale = 1)
+
+remedy_count %>%
+  filter(Resolution %in% c("Expedited Proceeding", "Missing Data", "Letter")#, "Other")
+         ) %>%
+  mutate(Resolution = fct_recode(Resolution, "Expedited Proceeding" = "Robustness")) %>%
   ggplot(aes(x = year, y = proportion, linetype = Resolution)) +
   geom_line() +
   geom_line(data = total_count_summary, aes(x = year, y = proportion_expedited_9552), 
             colour = "magenta",
             linetype = "solid") +
-  labs(title = "Dispositions of FINRA bars") +
+  labs(title = "Robustness check: Brokercheck 'resolution' categories identify expedited proceedings",
+       subtitle = "Collapsing 'letter', 'other', and NA approximates regex match for Rule 9552 (magenta)") +
   xlab("Year") +
-  theme_minimal() +
+  theme_classic() +
   scale_y_continuous(name = "Annual percentage of bars in category",
                      labels = scales::label_percent())
 
-ggsave("FINRA_bars_dispositions.png",
+ggsave("Figure 9 --- FINRA_bars_robustness_proportions.png",
        dpi = 300,
-       scale = 0.5)
+       scale = 1)
+
+remedy_count %>%
+  filter(Resolution %in% c("Letter", "Other", "Missing Data", "Expedited Proceeding")) %>%
+  mutate(Resolution = fct_recode(Resolution, "Expedited Proceeding" = "Robustness")) %>%
+  ggplot(aes(x = year, y = count, linetype = Resolution)) +
+  geom_line() +
+  geom_line(data = total_count_summary, aes(x = year, y = expedited_9552), 
+            colour = "magenta",
+            linetype = "solid") +
+  labs(title = "Robustness check: Brokercheck 'resolution' categories identify expedited proceedings",
+       subtitle = "Collapsing 'letter', 'other', and NA approximates regex match for Rule 9552 (magenta)") +
+  xlab("Year") +
+  theme_classic() +
+  scale_y_continuous(name = "Annual count of bars in category")
+
+ggsave("Figure 10 --- FINRA_bars_robustness_counts.png",
+       dpi = 300,
+       scale = 1)
+
+
+
 
 ggplot(data = total_count_summary, aes(x = year)) +
   geom_line(aes(y = proportion_conversion_alleged), 
@@ -760,10 +947,10 @@ ggplot(data = total_count_summary, aes(x = year)) +
             linetype = "21",
             colour = "grey85",
             size = 1.5) +
-  geom_line(aes(y = proportion_outsidebusiness_alleged), 
-            linetype = "21",
-            colour = "grey15",
-            size = 1.5) +
+#  geom_line(aes(y = proportion_outsidebusiness_alleged), 
+#            linetype = "21",
+#            colour = "grey15",
+#            size = 1.5) +
 #  geom_line(aes(y = proportion_not_accounted_for), 
 #            linetype = "21",
 #            colour = "red",
@@ -776,30 +963,30 @@ ggplot(data = total_count_summary, aes(x = year)) +
             colour = "magenta",
             linetype = "solid",
             size = 1.5) +
-  geom_line(aes(y = proportion_pst_alleged), 
+#  geom_line(aes(y = proportion_pst_alleged), 
             #            linetype = "21",
-            colour = "blue",
-            size = 1.5) +
-  geom_line(aes(y = proportion_u4_alleged),
-            colour = "orange",
-            size = 1.5) +
-  geom_line(aes(y = proportion_suitability_alleged), 
+#            colour = "blue",
+#            size = 1.5) +
+#  geom_line(aes(y = proportion_u4_alleged),
+#            colour = "orange",
+#            size = 1.5) +
+#  geom_line(aes(y = proportion_suitability_alleged), 
+#            #            linetype = "21",
+#            colour = "black",
+#            size = 1.5) +
+#  geom_line(aes(y = proportion_exam_alleged), 
             #            linetype = "21",
-            colour = "black",
-            size = 1.5) +
-  geom_line(aes(y = proportion_exam_alleged), 
-            #            linetype = "21",
-            colour = "wheat3",
-            size = 1.5) +
+#            colour = "wheat3",
+#            size = 1.5) +
   labs(title = "Types of FINRA bars (by subject matter alleged)") +
   xlab("Year") +
   theme_minimal() +
   scale_y_continuous(name = "Annual percentage of bars in category",
                                                   labels = scales::label_percent())
 
-ggsave("FINRA_bars_allegations.png",
+ggsave("Figure 5 --- FINRA_bars_allegations.png",
        dpi = 300,
-       scale = 0.5)
+       scale = 1)
 
 ggplot(data = total_count_summary, aes(x = year)) +
   #  geom_line() +
@@ -811,42 +998,29 @@ ggplot(data = total_count_summary, aes(x = year)) +
             linetype = "21",
             colour = "grey85",
             size = 1.5) +
-  geom_line(aes(y = proportion_outsidebusiness_found), 
-            linetype = "21",
-            colour = "grey15",
-            size = 1.5) +
-  #  geom_line(aes(y = proportion_not_accounted_for), 
-  #            linetype = "21",
-  #            colour = "red",
-  #            size = 1.5) +
     geom_line(aes(y = proportion_just_and_equitable_found), 
   #            #            linetype = "21",
               colour = "green",
               size = 1.5) +
-  geom_line(aes(y = proportion_pst_found), 
-            #            linetype = "21",
-            colour = "blue",
-            size = 1.5) +
-  geom_line(aes(y = proportion_u4_found),
-            colour = "orange",
-            size = 1.5) +
   geom_line(aes(y = proportion_suitability_found), 
             #            linetype = "21",
             colour = "black",
             size = 1.5) +
-  geom_line(aes(y = proportion_exam_found), 
-            #            linetype = "21",
-            colour = "wheat3",
-            size = 1.5) +
+#  geom_line(aes(y = proportion_exam_found), 
+#            #            linetype = "21",
+#            colour = "wheat3",
+#            size = 1.5) +
   labs(title = "Types of FINRA bars (by conduct found)") +
   xlab("Year") +
   theme_minimal() +
   scale_y_continuous(name = "Annual percentage of bars in category",
                      labels = scales::label_percent())
 
-ggsave("FINRA_bars_findings.png",
+ggsave("Figure 6 --- FINRA_bars_findings.png",
        dpi = 300,
-       scale = 0.5)
+       scale = 1)
+
+
 
 without_admitting_time_series <- total_count_for_scraping %>%
   group_by(withoutadmitting, year) %>%
@@ -862,24 +1036,42 @@ awc_time_series <- total_count_for_scraping %>%
   ungroup() %>%
   mutate(proportion_by_consent_detected = `TRUE` / (`FALSE` + `TRUE`))
 
-ft_summarize_count %>%
+adj_time_series <- remedy_count %>%
+  filter(Resolution %in% c("Adjudication")) %>%
+  select(-c(Resolution, count, total)) %>%
+  rename(proportion_adjudicated = proportion)
+
+awc_bars <- ft_summarize_count %>%
   rename(year = Year) %>%
   left_join(awc_time_series) %>%
   select(-c(`FALSE`, `TRUE`)) %>%
   left_join(without_admitting_time_series) %>%
   select(-c(`FALSE`, `TRUE`)) %>%
+  left_join(adj_time_series) %>%
   ggplot(aes(x = year)) +
   geom_line(aes(y = proportion_by_consent_detected), linetype = "solid", size = 1) +
   geom_line(aes(y = proportion_withoutadmitting), linetype = "dotted", size = 1) +
-  labs(title = "FINRA bars resolved by consent or settlement") +
   xlab("Year") +
   scale_y_continuous("Proportion of bars",
                      labels = scales::label_percent()) +
-  theme_minimal()
+  theme_classic()
 
-ggsave("FINRA_awc_bars.png",
+awc_bars +   
+  labs(title = "FINRA bars resolved by consent or settlement")
+
+ggsave("Figure 3 --- FINRA_awc_bars.png",
        dpi = 300,
-       scale = 0.5)
+       scale = 1)
+
+awc_bars +
+  # If you want, you can include a version of this that has 
+  labs(title = "FINRA bars resolved by consent or settlement, vs. adjudications") +
+  geom_line(aes(y = proportion_adjudicated), linetype = "solid", color = "orange", size = 1)
+
+ggsave("Figure 3 variation --- FINRA_awc_bars.png",
+       dpi = 300,
+       scale = 1)
+
 
 
 
@@ -937,7 +1129,7 @@ total_count_for_scraping %>%
                                                   labels = scales::label_percent()))
 
 
-# i don't think we use this but it's a 
+# i don't think we use this but it's worth checking out
 
 total_count_for_scraping %>%
   select(CRD, Allegations, by_consent_detected, year) %>%
@@ -961,8 +1153,6 @@ total_count_for_scraping %>%
                                                   name = "Annual percentage",
                                                   labels = scales::label_percent()))
   
-#total_count_for_scraping <- total_count_for_scraping %>%
-#    arrange(index) %>%
-#    select(-c(links, has_crd, disclosureType, disclosureResolution, isIapdExcludedCCFlag, isBcExcludedCCFlag, bcCtgryType, DocketNumberFDA, DocketNumberAAO, `Firm Name`, `Initiated By`, `Termination Type`, Sanctions...20, `Damage Amount Requested`, `Damages Granted`, DisplayAAOLinkIfExists, arbitrationClaimFiledDetail, arbitrationDocketNumber, `Broker Comment`, `Settlement Amount`, criminalCharges, `Description of Investigation`, `Judgment/Lien Amount`, `Judgment/Lien Type`, Type, Disposition, iaCtgryType, Individual.Name, disclosure, categorical))
-  
-saveRDS(total_count_for_scraping, "total_count_for_scraping_post_analysis_2024_02_20.RDS")
+saveRDS(total_count_for_scraping, "total_count_for_scraping_post_analysis_2024_03_03.RDS")
+
+
