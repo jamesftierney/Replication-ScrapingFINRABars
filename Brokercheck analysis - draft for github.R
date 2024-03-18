@@ -4,22 +4,15 @@ library(lubridate)
 library(jsonlite)
 library(stringi)
 library(skimr)
-
+#install.packages("flextable")
+library(flextable)
 
 # ---- original analysis and replication on nov 13 from below
 
 # list of bars scraped from the finra bars website
-list_of_bars <- readRDS("list_of_bars.RDS")
+#list_of_bars <- readRDS("list_of_bars.RDS")
 
-# need to drop rows with duplicate entries
-# so create a vector of duped indexes to drop
-#dropped_bars <- test_list_of_bars %>%
-#  group_by(CRD) %>%
-#  filter(n() > 1) %>%
-#  ungroup() %>%
-#  # each duplicate entry has only two, so we can select just the second entry
-#  slice(which(row_number() %% 2 == 1)) %>%
-#  .$index 
+test_list_of_bars_unnested <- readRDS("test_list_of_bars_unnested_03_01_2024.RDS")
 
 test_list_of_bars_unnested 
 
@@ -30,7 +23,7 @@ test_list_of_bars_unnested
 #scraped_from_brokercheck <- readRDS("scraped_from_brokercheck_2023_11_13.RDS")
 
 # stuff my RAs and I hand-coded
-list_of_bars_manual <- read_csv("list_of_bars_manual (1).csv")
+list_of_bars_manual <- read_csv("list_of_bars_manual_2024.csv")
 
 initiated_by_unclean <-  
   test_list_of_bars_unnested %>%
@@ -211,13 +204,10 @@ finra_other_sanctions <- initiated_by_unclean %>%
          !str_detect(Sanctions...32, "Bar"))   %>%
   mutate(category = "Other sanctions imposed by FINRA in BrokerCheck records")
 
-# HAVE TO FIX THIS WITH THE DUPES
 total_count <- rbind(
   finra_hand_coded_disclosures,
   finra_just_bars
 )
-
-
 
 # ------------
 # we're going to make a new list of all the categoricals
@@ -268,8 +258,6 @@ total_count_with_dates <- total_count %>%
          eventDate = as.Date(eventDate)
   ) %>%
   select(-extracted)
-
-# MUST DEAL WITH THESE BEFORE PRODUCTION
 
 dupes <- total_count_with_dates %>%
   arrange(index) %>%
@@ -375,12 +363,7 @@ ft_summarize_count %>%
 
 ggsave("Figure 1 --- FINRA_annual_counts.png",
        dpi = 300,
-       scale = 0.5)
-
-
-
-#install.packages("flextable")
-library(flextable)
+       scale = 1)
 
 summarize_count <- total_count_with_dates %>%
   group_by(index) %>%
@@ -1129,7 +1112,7 @@ total_count_for_scraping %>%
                                                   labels = scales::label_percent()))
 
 
-# i don't think we use this but it's worth checking out
+# i don't think we use this but it's a 
 
 total_count_for_scraping %>%
   select(CRD, Allegations, by_consent_detected, year) %>%
@@ -1152,6 +1135,10 @@ total_count_for_scraping %>%
                      sec.axis = ggplot2::sec_axis(~. / 1000,
                                                   name = "Annual percentage",
                                                   labels = scales::label_percent()))
+  
+#total_count_for_scraping <- total_count_for_scraping %>%
+#    arrange(index) %>%
+#    select(-c(links, has_crd, disclosureType, disclosureResolution, isIapdExcludedCCFlag, isBcExcludedCCFlag, bcCtgryType, DocketNumberFDA, DocketNumberAAO, `Firm Name`, `Initiated By`, `Termination Type`, Sanctions...20, `Damage Amount Requested`, `Damages Granted`, DisplayAAOLinkIfExists, arbitrationClaimFiledDetail, arbitrationDocketNumber, `Broker Comment`, `Settlement Amount`, criminalCharges, `Description of Investigation`, `Judgment/Lien Amount`, `Judgment/Lien Type`, Type, Disposition, iaCtgryType, Individual.Name, disclosure, categorical))
   
 saveRDS(total_count_for_scraping, "total_count_for_scraping_post_analysis_2024_03_03.RDS")
 
