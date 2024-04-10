@@ -4,29 +4,34 @@ library(lubridate)
 library(jsonlite)
 library(stringi)
 library(skimr)
-#install.packages("flextable")
 library(flextable)
 
-# ---- original analysis and replication on nov 13 from below
+#################################################################
+## Replication code for analysis and figures
+## James Fallows Tierney, Reconsidering Securities Industry Bars,
+## forthcoming in Stanford Journal of Law, Business, & Finance
+## (2024).
+##
+## This is script #2, focusing on the analysis of scraped data
+## from BrokerCheck.
+#################################################################
 
 # list of bars scraped from the finra bars website
-#list_of_bars <- readRDS("list_of_bars.RDS")
+list_of_bars_unnested <- readRDS("list_of_bars_unnested_03_01_2024.RDS")
 
-test_list_of_bars_unnested <- readRDS("test_list_of_bars_unnested_03_01_2024.RDS")
+list_of_bars_unnested 
 
-test_list_of_bars_unnested 
-
-#test_list_of_bars <- test_list_of_bars_unnested %>%
+#list_of_bars <- list_of_bars_unnested %>%
 #  filter(!(index %in% dropped_bars))
 
 # stuff i scraped from brokercheck -- will upload that and this script, when cleaned, to github
 #scraped_from_brokercheck <- readRDS("scraped_from_brokercheck_2023_11_13.RDS")
 
 # stuff my RAs and I hand-coded
-list_of_bars_manual <- read_csv("list_of_bars_manual_2024.csv")
+list_of_bars_manual <- read_csv("list_of_bars_manual.csv")
 
 initiated_by_unclean <-  
-  test_list_of_bars_unnested %>%
+  list_of_bars_unnested %>%
   full_join(list_of_bars_manual) %>%
   rename(has_crd = crd) %>%
   mutate(off_jurisdiction = case_when(has_crd == TRUE & is.na(bcCtgryType) ~ TRUE,
@@ -187,8 +192,6 @@ initiated_by_unclean <-
 
 initiated_by_unclean_backup <- initiated_by_unclean
 
-# this got messed up in the last analysis
-
 finra_hand_coded_disclosures <- initiated_by_unclean %>%
   filter(barring_agency == "finra",
          is.na(Sanctions...32)) %>%
@@ -208,6 +211,8 @@ total_count <- rbind(
   finra_hand_coded_disclosures,
   finra_just_bars
 )
+
+
 
 # ------------
 # we're going to make a new list of all the categoricals
@@ -347,24 +352,37 @@ ft_summarize_flextable %>%
   #  width(j=~x,width=1) %>% width(j=~y,width=1) %>%
   save_as_docx(path = "Table 3 --- annual_counts.docx")
 
-ft_summarize_count %>%
-  #rename(`Naively imputed count` = `Imputed count`) %>%
-  pivot_longer(!Year, names_to = "Type", values_to = "Count") %>%
-  mutate(Type = as.factor(Type)) %>%
-  ggplot(mapping = aes(x = Year,
-                       y = Count,
-                       linetype = Type)) +
-  geom_line() +
-  geom_line(colour = 'grey70') +
-  labs(title = "Annual counts of FINRA bars") +
-  xlab("Year") +
-  ylab("Number of bars in category") +
-  theme_minimal() 
+# This creates figure 1.
+library(scales) 
+plot <- ft_summarize_count %>%
+ggplot(aes(x = Year, y = Count)) +
+geom_line(linetype = "solid", size = 0.7) +
+geom_point(shape = 10,  size = 1.0) +
+labs(title = "Annual Counts of FINRA Bars",
+x = "Year", y = "Number of Bars") +
+scale_x_continuous(breaks = seq(min(ft_summarize_count$Year), max(ft_summarize_count$Year), by = 1)) +
+scale_y_continuous(labels = comma, expand = c(0, 0), limits = c(0, max(ft_summarize_count$Count) * 1.05)) +
+theme_bw() +
+theme(
+axis.title.x = element_blank(),
+axis.title.y = element_text(size = 12, family = "Times New Roman"),
+axis.text.x = element_text(size = 10, angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+axis.text.y = element_text(size = 10, family = "Times New Roman"),
+plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+panel.grid.major.y = element_line(color = "gray90"),
+panel.grid.minor.y = element_blank(),
+panel.grid.major.x = element_blank(),
+plot.margin = margin(10, 10, 20, 10),
+legend.position = "none",
+panel.background = element_rect(fill = "white"),
+plot.background = element_rect(fill = "white")
+)
+plot
 
-ggsave("Figure 1 --- FINRA_annual_counts.png",
-       dpi = 300,
-       scale = 1)
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 1 - FINRA_annual_counts.png"),
+plot, width = 8, height = 5, dpi = 300)
 
+# This creates table 1.
 summarize_count <- total_count_with_dates %>%
   group_by(index) %>%
   arrange(eventDate, .by_group = TRUE) %>%
@@ -395,8 +413,9 @@ summarize_count %>%
   save_as_docx(path = "Table 1.docx")
 
 
-#####################################################
-# now let's find out the substance of the bars
+#################################################################
+## This turns to the substance of the bars.
+#################################################################
 
 # begin by defining some search terms
 
@@ -497,9 +516,8 @@ total_count_for_scraping <- total_count_for_scraping %>%
                                          Resolution == "Settlement" ~ TRUE,
                                          str_detect(`Regulator Statement`, "consent") ~ TRUE,
                                          TRUE ~ FALSE)) 
-
-
-
+  
+saveRDS(total_count_for_scraping, "total_count_for_scraping_post_analysis_2024_03_03.RDS")
 
 rule_8210_alleged_time_series <- total_count_for_scraping %>%
 #  filter(year > 1999,
@@ -766,6 +784,7 @@ total_count_summary <- ft_summarize_count %>%
   left_join(expedited_time_series) %>%
   select(-c(`FALSE`, `TRUE`, `NA`))
 
+# This creates the summary statistics table.
 total_count_stats <- total_count_summary %>%
   skim() 
 
@@ -786,31 +805,64 @@ total_count_stats %>%
   filter(!skim_variable %in% c("expedited_9552", "proportion_expedited_9554")) %>%
   regulartable() %>%
   save_as_docx(path = "Table 2.docx")
+library(dplyr)
 
-ggplot(data = total_count_summary, aes(x = year)) +
-  #  geom_line() +
-  geom_line(aes(y = proportion_8210_alleged, linetype = "Allegations of Rule 8210 violation"), 
-            #colour = "chocolate3",
+#################################################################
+## This creates figure 2.
+#################################################################
+
+# Calculate positions for labels at the end of each line
+label_positions <- total_count_summary %>%
+  summarise(
+    label_x_position = max(year), # Assuming 'year' is your x-axis variable
+    label_y_position_8210_alleged = proportion_8210_alleged[which.max(year)],
+    label_y_position_8210_found = proportion_8210_found[which.max(year)],
+    label_y_position_9552 = proportion_expedited_9552[which.max(year)]
+  )
+
+plot <- ggplot(data = total_count_summary, aes(x = year)) +
+  geom_line(aes(y = proportion_8210_alleged, linetype = "Alleged Rule 8210 Violation"),
             linetype = "dotted",
-            size = 1.5) +
-  geom_line(aes(y = proportion_8210_found, linetype = "Findings of Rule 8210 violation"), 
-            #colour = "magenta",
+            size = 0.7) +
+  geom_line(aes(y = proportion_8210_found, linetype = "Actual Rule 8210 Violation"),
             linetype = "solid",
-            size = 1.5) +
-  geom_line(aes(y = proportion_expedited_9552, linetype = "Expedited proceedings under Rule 9552"), 
-            colour = "magenta",
-            linetype = "solid",
-            size = 1.5) +
-  labs(title = "Types of FINRA bars") +
-  xlab("Year") +
-  theme_minimal() +
-  scale_y_continuous(name = "Annual percentage of bars in category",
-                     labels = scales::label_percent())
+            size = 0.7) +
+  geom_line(aes(y = proportion_expedited_9552, linetype = "Expedited Rule 9552 Proceeding"),
+            linetype = "dashed",
+            size = 0.7) +
+  labs(title = "Types of FINRA Bars",
+       x = "Year",
+       y = "Annual Percentage of Bars in Category") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_linetype_manual(name = "Bar Type",
+                        values = c("solid", "dotted", "dashed"),
+                        labels = c("Actual Rule 8210 Violation", "Alleged Rule 8210 Violation", "Expedited Rule 9552 Proceeding")) +
+  theme_bw() +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ) +
+  geom_text(data = label_positions, aes(x = label_x_position, y = label_y_position_8210_alleged, label = "Alleged Rule 8210 Violation"), hjust = 1.2, vjust = 8, family = "Times New Roman") +
+  geom_text(data = label_positions, aes(x = label_x_position, y = label_y_position_8210_found, label = "Actual Rule 8210 Violation"), hjust = 1.2, vjust = 0, family = "Times New Roman") +
+  geom_text(data = label_positions, aes(x = label_x_position, y = label_y_position_9552, label = "Expedited Rule 9552 Proceeding"), hjust = 1.2, vjust = 0, family = "Times New Roman")
 
-ggsave("Figure 2 -- FINRA_8210_bars.png",
-       dpi = 300,
-       scale = 1)
+plot
 
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 2 - FINRA_8210_bars.png"),
+       plot, width = 8, height = 5, dpi = 300)
+
+#################################################################
+## This creates figure 7.
+#################################################################
 library(forcats)
 
 remedy_count_join <- total_count_for_scraping %>%
@@ -853,159 +905,266 @@ remedy_count <- total_count_for_scraping %>%
   full_join(unknowns) %>%
   filter(year>1998) 
 
-remedy_count %>%
+plot <- remedy_count %>%
   filter(Resolution %in% c("Settlement", "Adjudication", "Expedited Proceeding")) %>%
   ggplot(aes(x = year, y = proportion, linetype = Resolution)) +
-  geom_line() +
-  labs(title = "Dispositions of FINRA bars (by proportion)") +
-  xlab("Year") +
-  theme_classic() +
-  scale_y_continuous(name = "Percentage of that year's bars resolved by this category of disposition",
-                     labels = scales::label_percent())
+  geom_line(size = 0.7) +
+  labs(title = "Dispositions of FINRA Bars (by Proportion)",
+       x = "Year",
+       y = "Percentage of Bars Resolved") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_linetype_manual(name = "Disposition",
+                        values = c("Settlement" = "solid",
+                                   "Adjudication" = "dashed",
+                                   "Expedited Proceeding" = "dotted")) +
+  theme_bw() +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
-ggsave("Figure 7 --- FINRA_bars_dispositions_proportional.png",
-       dpi = 300,
-       scale = 1)
+plot
 
-remedy_count %>%
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 7 - FINRA_bars_dispositions_proportional.png"),
+       plot, width = 8, height = 5, dpi = 300)
+
+#################################################################
+## This creates figure 8.
+#################################################################
+
+plot <- remedy_count %>%
   filter(Resolution %in% c("Settlement", "Adjudication", "Expedited Proceeding")) %>%
   ggplot(aes(x = year, y = count, linetype = Resolution)) +
-  geom_line() +
-  labs(title = "Dispositions of FINRA bars (count)") +
-  xlab("Year") +
-  theme_classic() +
-  scale_y_continuous(name = "Annual count of bars resolved by this category of disposition")
+  geom_line(size = 0.7) +
+  labs(title = "Dispositions of FINRA Bars (Count)",
+       x = "Year",
+       y = "Annual Count of Bars Resolved") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_linetype_manual(name = "Disposition",
+                        values = c("Settlement" = "solid",
+                                   "Adjudication" = "dashed",
+                                   "Expedited Proceeding" = "dotted")) +
+  theme_bw() +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
-ggsave("Figure 8 --- FINRA_bars_dispositions_count.png",
-       dpi = 300,
-       scale = 1)
+plot
 
-remedy_count %>%
-  filter(Resolution %in% c("Expedited Proceeding", "Missing Data", "Letter")#, "Other")
-         ) %>%
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 8 - FINRA_bars_dispositions_count.png"),
+       plot, width = 8, height = 5, dpi = 300)
+
+#################################################################
+## This creates figure 9.
+#################################################################
+plot <- remedy_count %>%
+  filter(Resolution %in% c("Expedited Proceeding", "Missing Data", "Letter")) %>%
   mutate(Resolution = fct_recode(Resolution, "Expedited Proceeding" = "Robustness")) %>%
   ggplot(aes(x = year, y = proportion, linetype = Resolution)) +
-  geom_line() +
-  geom_line(data = total_count_summary, aes(x = year, y = proportion_expedited_9552), 
-            colour = "magenta",
-            linetype = "solid") +
-  labs(title = "Robustness check: Brokercheck 'resolution' categories identify expedited proceedings",
-       subtitle = "Collapsing 'letter', 'other', and NA approximates regex match for Rule 9552 (magenta)") +
-  xlab("Year") +
-  theme_classic() +
-  scale_y_continuous(name = "Annual percentage of bars in category",
-                     labels = scales::label_percent())
+  geom_line(size = 0.7) +
+  geom_line(data = total_count_summary, aes(x = year, y = proportion_expedited_9552, linetype = "Rule 9552 Regex Match"),
+            size = 0.9) +
+  labs(title = "Brokercheck Expedited Proceedings Robustness Check",
+       x = "Year",
+       y = "Annual Percentage of Bars in Category") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_linetype_manual(name = "Resolution",
+                        values = c("Expedited Proceeding" = "solid",
+                                   "Missing Data" = "longdash",
+                                   "Letter" = "dotted",
+                                   "Rule 9552 Regex Match" = "dotdash"),
+                        guide = guide_legend(override.aes = list(linetype = c("solid", "longdash", "dotted", "dotdash"),
+                                                                 size = c(0.7, 0.7, 0.7, 1.4)))) +
+  theme_bw() +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
-ggsave("Figure 9 --- FINRA_bars_robustness_proportions.png",
-       dpi = 300,
-       scale = 1)
+plot
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 9 - FINRA_bars_robustness_proportions.png"),
+plot, width = 8, height = 5, dpi = 300)
 
-remedy_count %>%
+#################################################################
+## This creates figure 10.
+#################################################################
+
+  plot <- remedy_count %>%
   filter(Resolution %in% c("Letter", "Other", "Missing Data", "Expedited Proceeding")) %>%
   mutate(Resolution = fct_recode(Resolution, "Expedited Proceeding" = "Robustness")) %>%
   ggplot(aes(x = year, y = count, linetype = Resolution)) +
-  geom_line() +
-  geom_line(data = total_count_summary, aes(x = year, y = expedited_9552), 
-            colour = "magenta",
-            linetype = "solid") +
-  labs(title = "Robustness check: Brokercheck 'resolution' categories identify expedited proceedings",
-       subtitle = "Collapsing 'letter', 'other', and NA approximates regex match for Rule 9552 (magenta)") +
-  xlab("Year") +
-  theme_classic() +
-  scale_y_continuous(name = "Annual count of bars in category")
+  geom_line(size = 0.7) +
+  geom_line(data = total_count_summary, aes(x = year, y = expedited_9552, linetype = "Rule 9552 Regex Match"),
+            size = 0.9) +
+  labs(title = "Brokercheck Expedited Proceedings Robustness Check",
+       x = "Year",
+       y = "Annual Count of Bars in Category") +
+  scale_linetype_manual(values = c("Expedited Proceeding" = "solid",
+                                   "Missing Data" = "longdash",
+                                   "Letter" = "dotted",
+                                   "Other" = "dashed",
+                                   "Rule 9552 Regex Match" = "dotdash"),
+                        guide = guide_legend(override.aes = list(linetype = c("solid", "longdash", "dotted", "dashed", "dotdash"),
+                                                                 size = c(0.7, 0.7, 0.7, 0.7, 1.4),
+                                                                 title = "Legend\nTitle"))) +
+  theme_bw() +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.text = element_text(size = 10, family = "Times New Roman"),
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
-ggsave("Figure 10 --- FINRA_bars_robustness_counts.png",
+plot
+
+
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 10 - FINRA_bars_robustness_counts.png"),
+       plot, width = 8, height = 5, dpi = 300)
+
+#################################################################
+## This creates figure 5.
+#################################################################
+
+  ggplot(data = total_count_summary, aes(x = year)) +
+  geom_line(aes(y = proportion_conversion_alleged, linetype = "Conversion"),
+            size = 0.7) +
+  geom_line(aes(y = proportion_fraud_alleged, linetype = "Fraud"),
+            size = 0.7) +
+  geom_line(aes(y = proportion_just_and_equitable_alleged, linetype = "Just and Equitable"),
+            size = 0.7) +
+  geom_line(aes(y = proportion_expedited_9552, linetype = "Expedited 9552"),
+            size = 0.7) +
+  labs(title = "Types of FINRA Bars by Subject Matter Alleged") +
+  xlab("Year") +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8, family = "Times New Roman")
+  ) +
+  scale_y_continuous(name = "Annual Percentage of Bars in Category",
+                     labels = scales::label_percent()) +
+  scale_linetype_manual(values = c("Conversion" = "dashed",
+                                   "Fraud" = "dotted",
+                                   "Just and Equitable" = "solid",
+                                   "Expedited 9552" = "solid"),
+                        guide = guide_legend(nrow = 2, byrow = TRUE))
+
+ggsave("Figure 5 - FINRA_bars_allegations_bw.png",
        dpi = 300,
        scale = 1)
 
 
+#################################################################
+## This creates figure 6.
+#################################################################
 
+plot <- total_count_summary %>%
+  ggplot(aes(x = year)) +
+  geom_line(aes(y = proportion_conversion_found, linetype = "Conversion"),
+            size = 0.7) +
+  geom_point(aes(y = proportion_conversion_found, shape = "Conversion"),
+             size = 0.9) +
+  geom_line(aes(y = proportion_fraud_found, linetype = "Fraud"),
+            size = 0.7) +
+  geom_point(aes(y = proportion_fraud_found, shape = "Fraud"),
+             size = 0.9) +
+  geom_line(aes(y = proportion_just_and_equitable_found, linetype = "Just and Equitable"),
+            size = 0.7) +
+  geom_point(aes(y = proportion_just_and_equitable_found, shape = "Just and Equitable"),
+             size = 0.9) +
+  geom_line(aes(y = proportion_suitability_found, linetype = "Suitability"),
+            size = 0.7) +
+  geom_point(aes(y = proportion_suitability_found, shape = "Suitability"),
+             size = 0.9) +
+  labs(title = "Types of FINRA Bars by Conduct Found",
+       x = "Year",
+       y = "Annual Percentage of Bars in Category") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_linetype_manual(name = "Conduct Found",
+                        values = c("Conversion" = "solid",
+                                   "Fraud" = "dashed",
+                                   "Just and Equitable" = "solid",
+                                   "Suitability" = "dashed")) +
+  scale_shape_manual(name = "Conduct Found",
+                     values = c("Conversion" = 16,
+                                "Fraud" = 17,
+                                "Just and Equitable" = 15,
+                                "Suitability" = 18),
+                     guide = guide_legend(nrow = 1, byrow = TRUE, title.position = "top", title.hjust = 0.5)) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 8, family = "Times New Roman"),
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
-ggplot(data = total_count_summary, aes(x = year)) +
-  geom_line(aes(y = proportion_conversion_alleged), 
-            linetype = "dashed",
-            colour = "cyan4",
-            size = 1.5) +
-  geom_line(aes(y = proportion_fraud_alleged), 
-            linetype = "21",
-            colour = "grey85",
-            size = 1.5) +
-#  geom_line(aes(y = proportion_outsidebusiness_alleged), 
-#            linetype = "21",
-#            colour = "grey15",
-#            size = 1.5) +
-#  geom_line(aes(y = proportion_not_accounted_for), 
-#            linetype = "21",
-#            colour = "red",
-#            size = 1.5) +
-  geom_line(aes(y = proportion_just_and_equitable_alleged), 
-            #            linetype = "21",
-            colour = "green",
-            size = 1.5) +
-  geom_line(aes(y = proportion_expedited_9552), 
-            colour = "magenta",
-            linetype = "solid",
-            size = 1.5) +
-#  geom_line(aes(y = proportion_pst_alleged), 
-            #            linetype = "21",
-#            colour = "blue",
-#            size = 1.5) +
-#  geom_line(aes(y = proportion_u4_alleged),
-#            colour = "orange",
-#            size = 1.5) +
-#  geom_line(aes(y = proportion_suitability_alleged), 
-#            #            linetype = "21",
-#            colour = "black",
-#            size = 1.5) +
-#  geom_line(aes(y = proportion_exam_alleged), 
-            #            linetype = "21",
-#            colour = "wheat3",
-#            size = 1.5) +
-  labs(title = "Types of FINRA bars (by subject matter alleged)") +
-  xlab("Year") +
-  theme_minimal() +
-  scale_y_continuous(name = "Annual percentage of bars in category",
-                                                  labels = scales::label_percent())
+plot
 
-ggsave("Figure 5 --- FINRA_bars_allegations.png",
-       dpi = 300,
-       scale = 1)
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 6 - FINRA_bars_conduct_found.png"),
+       plot, width = 8, height = 5, dpi = 300)
 
-ggplot(data = total_count_summary, aes(x = year)) +
-  #  geom_line() +
-  geom_line(aes(y = proportion_conversion_found), 
-            linetype = "dashed",
-            colour = "cyan4",
-            size = 1.5) +
-  geom_line(aes(y = proportion_fraud_found), 
-            linetype = "21",
-            colour = "grey85",
-            size = 1.5) +
-    geom_line(aes(y = proportion_just_and_equitable_found), 
-  #            #            linetype = "21",
-              colour = "green",
-              size = 1.5) +
-  geom_line(aes(y = proportion_suitability_found), 
-            #            linetype = "21",
-            colour = "black",
-            size = 1.5) +
-#  geom_line(aes(y = proportion_exam_found), 
-#            #            linetype = "21",
-#            colour = "wheat3",
-#            size = 1.5) +
-  labs(title = "Types of FINRA bars (by conduct found)") +
-  xlab("Year") +
-  theme_minimal() +
-  scale_y_continuous(name = "Annual percentage of bars in category",
-                     labels = scales::label_percent())
+#################################################################
+## This creates figure 3.
+#################################################################
 
-ggsave("Figure 6 --- FINRA_bars_findings.png",
-       dpi = 300,
-       scale = 1)
-
-
-
-without_admitting_time_series <- total_count_for_scraping %>%
+  without_admitting_time_series <- total_count_for_scraping %>%
   group_by(withoutadmitting, year) %>%
   count() %>%
   pivot_wider(names_from = withoutadmitting, values_from = n) %>%
@@ -1024,6 +1183,7 @@ adj_time_series <- remedy_count %>%
   select(-c(Resolution, count, total)) %>%
   rename(proportion_adjudicated = proportion)
 
+
 awc_bars <- ft_summarize_count %>%
   rename(year = Year) %>%
   left_join(awc_time_series) %>%
@@ -1032,114 +1192,209 @@ awc_bars <- ft_summarize_count %>%
   select(-c(`FALSE`, `TRUE`)) %>%
   left_join(adj_time_series) %>%
   ggplot(aes(x = year)) +
-  geom_line(aes(y = proportion_by_consent_detected), linetype = "solid", size = 1) +
-  geom_line(aes(y = proportion_withoutadmitting), linetype = "dotted", size = 1) +
+  geom_line(aes(y = proportion_by_consent_detected, linetype = "By Consent"), size = 0.7) +
+  geom_line(aes(y = proportion_withoutadmitting, linetype = "Without Admitting"), size = 0.7) +
+  geom_line(aes(y = proportion_adjudicated, linetype = "Adjudicated"), size = 0.7) +
   xlab("Year") +
-  scale_y_continuous("Proportion of bars",
+  scale_y_continuous("Proportion of Bars",
                      labels = scales::label_percent()) +
-  theme_classic()
+  labs(title = "FINRA Bars Resolved by Consent or Settlement, vs. Adjudications") +
+  theme_bw(base_family = "Times New Roman") +
+  theme(panel.grid.major.y = element_line(color = "gray90"), 
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, family = "Times New Roman"),
+        plot.margin = margin(10, 10, 30, 10),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white")) +
+  scale_linetype_manual(name = "Resolution Type", values = c("By Consent" = "solid", "Without Admitting" = "dotted", "Adjudicated" = "dashed")) +
+  guides(linetype = guide_legend(override.aes = list(size = 3)))
+awc_bars
 
-awc_bars +   
-  labs(title = "FINRA bars resolved by consent or settlement")
-
-ggsave("Figure 3 --- FINRA_awc_bars.png",
-       dpi = 300,
-       scale = 1)
-
-awc_bars +
-  # If you want, you can include a version of this that has 
-  labs(title = "FINRA bars resolved by consent or settlement, vs. adjudications") +
-  geom_line(aes(y = proportion_adjudicated), linetype = "solid", color = "orange", size = 1)
-
-ggsave("Figure 3 variation --- FINRA_awc_bars.png",
-       dpi = 300,
-       scale = 1)
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 3 - FINRA_awc_bars.png"),
+       awc_bars, width = 8, height = 5, dpi = 300)
 
 
-
+#################################################################
+## This creates a figure that may not have been used.
+#################################################################
 
 # run!
-rule_8210_alleged_time_series %>%
+plot <- rule_8210_alleged_time_series %>%
   filter(year > 1999) %>%
   ggplot(aes(x = year)) +
   geom_line(aes(y = `FALSE`), colour = 'grey70') +
-  geom_line(aes(y = `TRUE`)) +
-  geom_line(aes(y = `TRUE` + `FALSE`), linetype = "dashed") +
-  geom_line(data = (rule_8210_alleged_time_series %>% filter(year > 1999)), 
+  geom_line(aes(y = `TRUE`), colour = "blue") +
+  geom_line(aes(y = `TRUE` + `FALSE`), linetype = "dashed", colour = "red") +
+  geom_line(data = rule_8210_alleged_time_series %>% filter(year > 1999), 
             aes(y = proportion_8210_alleged * 400), 
             linetype = "dotted",
             colour = "chocolate3", 
             size = 1.5) +
-#  geom_line(data = total_count, aes(x = year, y = count)) +
-  labs(title = "FINRA bars involving rule 8210"#,
-       #caption = "Black line is count of 8210 bars, grey line is non-8210 count. Dashed line is total. Dotted is proportion of 8210. All series binned by year."
-       ) +
+  labs(
+    title = "FINRA Bars Involving Rule 8210",
+    x = "Year",
+    y = "Number of Bars in Category",
+    caption = "Lines represent counts and proportions of bars involving Rule 8210 over time."
+  ) +
+  theme_economist() + # Apply The Economist style theme
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.caption = element_text(size = 8),
+    legend.position = "bottom"
+  ) +
+  scale_y_continuous(
+    "Annual Count",
+    sec.axis = sec_axis(~. / 400, name = "Annual Percentage", labels = label_percent())
+  )
+
+plot
+
+
+total_count_summary <- ft_summarize_count %>%
+  rename(year = Year) %>%
+  left_join(rule_8210_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`, `NA`)) %>%
+  left_join(rule_8210_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`)) %>%
+  left_join(conversion_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`, `NA`)) %>%
+  left_join(conversion_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`)) %>%
+  left_join(fraud_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(fraud_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(expedited_9552_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(expedited_9553_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(expedited_9554_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(outsidebusiness_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(outsidebusiness_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(pst_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(pst_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(exam_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(exam_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(u4_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(u4_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(suitability_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(suitability_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(disqualification_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(disqualification_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(u4_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(u4_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`))  %>%
+  left_join(just_and_equitable_alleged_time_series) %>%
+  select(-c(`FALSE`, `TRUE`)) %>%
+  left_join(just_and_equitable_found_time_series) %>%
+  select(-c(`FALSE`, `TRUE`)) %>%
+  left_join(expedited_time_series) %>%
+  select(-c(`FALSE`, `TRUE`, `NA`))
+
+#################################################################
+## Maybe we are making table 2 again?
+#################################################################
+
+total_count_stats <- total_count_summary %>%
+  skim() 
+
+total_count_stats %>%
+  filter(skim_type == "numeric") %>%
+  slice(2:26) %>%
+  as_tibble() %>%
+  mutate(`% complete` = round(complete_rate, digits = 2),
+         Mean = round(numeric.mean, digits = 2),
+         SD = round(numeric.sd, digits = 2),
+         Minimum = round(numeric.p0, digits = 2),
+         `25th %ile` = round(numeric.p25, digits = 2),
+         `50th %ile` = round(numeric.p50, digits = 2),
+         `75th %ile` = round(numeric.p75, digits = 2),
+         Maximum = round(numeric.p100, digits = 2)) %>%
+  select(skim_variable, `% complete`, Mean, SD, Minimum, `25th %ile`, `50th %ile`, `75th %ile`, Maximum, numeric.hist) %>%
+  rename(Histogram = numeric.hist) %>%
+  filter(!skim_variable %in% c("expedited_9552", "proportion_expedited_9554")) %>%
+  regulartable() %>%
+  save_as_docx(path = "Table 2.docx")
+
+ggplot(data = total_count_summary, aes(x = year)) +
+  #  geom_line() +
+  geom_line(aes(y = proportion_8210_alleged, linetype = "Allegations of Rule 8210 violation"), 
+            #colour = "chocolate3",
+            linetype = "dotted",
+            size = 1.5) +
+  geom_line(aes(y = proportion_8210_found, linetype = "Findings of Rule 8210 violation"), 
+            #colour = "magenta",
+            linetype = "solid",
+            size = 1.5) +
+  geom_line(aes(y = proportion_expedited_9552, linetype = "Expedited proceedings under Rule 9552"), 
+            colour = "magenta",
+            linetype = "solid",
+            size = 1.5) +
+  labs(title = "Types of FINRA bars") +
   xlab("Year") +
-  ylab("Number of bars in category") +
   theme_minimal() +
-  scale_y_continuous("Annual count",
-                     sec.axis = ggplot2::sec_axis(~. / 400,
-                                                  name = "Annual percentage",
-                                                  labels = scales::label_percent()))
+  scale_y_continuous(name = "Annual percentage of bars in category",
+                     labels = scales::label_percent())
 
-ggsave("FINRA_8210_bars_2.png",
-       dpi = 300,
-       scale = 0.5)
+#################################################################
+## This creates figure 2.
+#################################################################
 
+plot <- ggplot(data = total_count_summary, aes(x = year)) +
+  geom_line(aes(y = proportion_8210_alleged, linetype = "Allegations of Rule 8210 Violation"),
+            size = 0.7) +
+  geom_line(aes(y = proportion_8210_found, linetype = "Findings of Rule 8210 Violation"),
+            size = 0.7) +
+  geom_line(aes(y = proportion_expedited_9552, linetype = "Expedited Proceedings Under Rule 9552"),
+            size = 0.7) +
+  labs(
+    title = "Types of FINRA Bars",
+    x = "Year",
+    y = "Annual Percentage of Bars in Category",
+    linetype = "Resolution Type"
+  ) +
+  theme_bw() + # Apply a black and white theme
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 8, family = "Times New Roman"), # Smaller font size for legend titles
+    legend.text = element_text(size = 8, family = "Times New Roman"), # Smaller font size for legend text
+    axis.title = element_text(size = 12, family = "Times New Roman"),
+    axis.text = element_text(size = 10, family = "Times New Roman"),
+    plot.title = element_text(size = 14, hjust = 0.5, family = "Times New Roman"),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ) +
+  scale_linetype_manual(values = c("Allegations of Rule 8210 Violation" = "dotted",
+                                   "Findings of Rule 8210 Violation" = "solid",
+                                   "Expedited Proceedings Under Rule 9552" = "dashed")) +
+  scale_y_continuous(labels = label_percent()) +
+  guides(
+    linetype = guide_legend(nrow = 3, byrow = TRUE, override.aes = list(size = 1.2))
+  )
 
+plot
 
-# this was exploratory --- did not use
-
-total_count_for_scraping %>%
-  select(CRD, Allegations, conversion_found, conversion_alleged, year) %>%
-  group_by(conversion_found, year) %>%
-  count() %>%
-  pivot_wider(names_from = conversion_found, values_from = n) %>%
-  filter(year > 1999,
-         year < 2023) %>%
-  mutate(proportion = `TRUE` / (`FALSE` + `TRUE`)) %>%
-  ggplot(aes(x = year)) +
-  geom_line(aes(y = `FALSE`), colour = 'grey70') +
-  geom_line(aes(y = `TRUE`)) +
-  geom_line(aes(y = proportion * 3000), linetype = "dotted") +
-  labs(title = "FINRA bars involving conversion") +
-  xlab("Year") +
-  ylab("Number of bars in category") +
-  theme_minimal() +
-  scale_y_continuous("Annual count",
-                     sec.axis = ggplot2::sec_axis(~. / 3000,
-                                                  name = "Annual percentage",
-                                                  labels = scales::label_percent()))
-
-
-# i don't think we use this but it's a 
-
-total_count_for_scraping %>%
-  select(CRD, Allegations, by_consent_detected, year) %>%
-  group_by(by_consent_detected, year) %>%
-  count() %>%
-  pivot_wider(names_from = by_consent_detected, values_from = n) %>%
-  filter(year > 1999,
-         year < 2023) %>%
-  mutate(proportion = `TRUE` / (`FALSE` + `TRUE`)) %>%
-  ggplot(aes(x = year)) +
-  geom_line(aes(y = `FALSE`), colour = 'grey70') +
-  geom_line(aes(y = `TRUE`)) +
-  geom_point(aes(y = proportion * 1000)) +
-  labs(title = "FINRA bars resolved by consent",
-       subtitle = "In recent years, just barely a majority of bars annually") +
-  xlab("Year") +
-  ylab("Number of bars in category") +
-  theme_minimal() +
-  scale_y_continuous("Annual count",
-                     sec.axis = ggplot2::sec_axis(~. / 1000,
-                                                  name = "Annual percentage",
-                                                  labels = scales::label_percent()))
-  
-#total_count_for_scraping <- total_count_for_scraping %>%
-#    arrange(index) %>%
-#    select(-c(links, has_crd, disclosureType, disclosureResolution, isIapdExcludedCCFlag, isBcExcludedCCFlag, bcCtgryType, DocketNumberFDA, DocketNumberAAO, `Firm Name`, `Initiated By`, `Termination Type`, Sanctions...20, `Damage Amount Requested`, `Damages Granted`, DisplayAAOLinkIfExists, arbitrationClaimFiledDetail, arbitrationDocketNumber, `Broker Comment`, `Settlement Amount`, criminalCharges, `Description of Investigation`, `Judgment/Lien Amount`, `Judgment/Lien Type`, Type, Disposition, iaCtgryType, Individual.Name, disclosure, categorical))
-  
-saveRDS(total_count_for_scraping, "total_count_for_scraping_post_analysis_2024_03_03.RDS")
-
-
+ggsave(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "Figure 2 - FINRA_8210_bars.png"),
+       plot, width = 8, height = 5, dpi = 300)
